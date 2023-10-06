@@ -73,58 +73,63 @@ contract ZK {
     return verified;
   }
 
-  // Example Case:
-  // [1, 1, 1, 2, 2, 2, 3, 3, 3] x [1, 2, 1] = [4, 8, 12]
+  /// @notice Verifies that the prover knows matrix * s = o.
+  /// @param matrix The matrix
+  /// @param s The solution vector
+  /// @param o The output vector
+  /// @return verified True if the prover knows matrix * s = o
   function matmul_nbyn(
     uint256[] calldata matrix,
     uint256 n, // n x n for the matrix
     ECPoint[] calldata s, // n elements
-    ECPoint[] calldata o // n elements
+    uint256[] calldata o // n elements
   ) public view returns (bool verified) {
     // revert if dimensions don't make sense or the matrices are empty
-    // TODO: Improve these requirement checks
-    require(s.length > 0, "Matrix s must not be empty.");
-    require(o.length > 0, "Matrix o must not be empty.");
-    require(s.length == o.length, "Matrices must be of equal size.");
+    require(matrix.length == n ** 2, "Matrix matrix must be of n^2 length.");
+    require(s.length == n, "Matrix s must be of n length.");
+    require(o.length == n, "Matrix o must be of n length.");
 
     // return true if Ms == 0 elementwise. You need to do n equality checks. If you're lazy, you can hardcode n to 3, but it is suggested that you do this with a for loop
-    
-    // ECPoint[3] memory s = [
-    //   ECPoint(3010198690406615200373504922352659861758983907867017329644089018310584441462, 4027184618003122424972590350825261965929648733675738730716654005365300998076),
-    //   ECPoint(3932705576657793550893430333273221375907985235130430286685735064194643946083, 18813763293032256545937756946359266117037834559191913266454084342712532869153),
-    //   ECPoint(17108685722251241369314020928988529881027530433467445791267465866135602972753, 20666112440056908034039013737427066139426903072479162670940363761207457724060)
-    // ];
 
-    // ECPoint[3] memory o = [
-    //   ECPoint(1, 2),
-    //   ECPoint(1368015179489954701390400359078579693043519447331113978918064868415326638035, 9918110051302171585080402603319702774565515993150576347155970296011118125764),
-    //   ECPoint(1, 2)
-    // ];
-  
-    // Had to use nasty pattern because of call depth
-    // I <3 Solidity
+    // convert o to ECPoints
+    ECPoint[] memory oPoints = new ECPoint[](o.length);
+
+    for (uint i = 0; i < o.length; i++) {
+      (uint256 pointX, uint256 pointY) = mul(o[i], G.x, G.y);
+      oPoints[i] = ECPoint(pointX, pointY);
+    }
+
+    // verify
+    ECPoint[] memory LHS = new ECPoint[](n);
+
+    for (uint i = 0; i < n**2; i += n) {
+      ECPoint[] memory accumulator = new ECPoint[](n);
+
+      // Get scaled points
+      for (uint j = 0; j < n; j++) {
+        (uint256 pointX, uint256 pointY) = mul(matrix[j + i], s[j].x, s[j].y);
+        accumulator[j] = ECPoint(pointX, pointY);
+      }
+
+      // Add scaled points together
+      for (uint j = 0; j < n - 1; j++) {
+        (uint256 pointX, uint256 pointY) = add(accumulator[j].x, accumulator[j].y, accumulator[j + 1].x, accumulator[j + 1].y);
+        accumulator[j + 1] = ECPoint(pointX, pointY);
+      }
+
+      // Insert added points into LHS
+      LHS[i / n] = accumulator[n - 1];
+    }
+
+    verified = true;
+
     for (uint i = 0; i < n; i++) {
-      // Mulitply M by points in o
-      (uint256 oneone_x, uint256 oneone_y) = mul(matrix[0 + i * n], o[i].x, o[i].y);
-      (uint256 twoone_x, uint256 twoone_y) = mul(matrix[1 + i * n], o[i].x, o[i].y);
-      (uint256 threeone_x, uint256 threeone_y) = mul(matrix[2 + i * n], o[i].x, o[i].y);
-
-      // Add points together to get point for testing against s
-      (uint256 firstadd_x, uint256 firstadd_y) = add(oneone_x, oneone_y, twoone_x, twoone_y);
-      (uint256 secondadd_x, uint256 secondadd_y) = add(firstadd_x, firstadd_y, threeone_x, threeone_y);
-
-      // If the points are unequal, we break and return false.
-      // No need to continue processing.
-      if (secondadd_x != s[0].x || secondadd_y != s[0].y) {
-        return false;
+      if (LHS[i].x != oPoints[i].x || LHS[i].y != oPoints[i].y) {
+        verified = false;
+        break;
       }
     }
 
-    return true;
+    return verified;
   }
 }
-
-
-// s = [["3010198690406615200373504922352659861758983907867017329644089018310584441462", "4027184618003122424972590350825261965929648733675738730716654005365300998076"],["3932705576657793550893430333273221375907985235130430286685735064194643946083", "18813763293032256545937756946359266117037834559191913266454084342712532869153"],["17108685722251241369314020928988529881027530433467445791267465866135602972753", "20666112440056908034039013737427066139426903072479162670940363761207457724060"]]
-
-// o = [["1", "2"],["1368015179489954701390400359078579693043519447331113978918064868415326638035", "9918110051302171585080402603319702774565515993150576347155970296011118125764"],["1", "2"]]
